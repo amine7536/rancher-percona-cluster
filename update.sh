@@ -5,7 +5,7 @@ cd "$(dirname "$(readlink -f "$BASH_SOURCE")")"
 
 versions=( "$@" )
 if [ ${#versions[@]} -eq 0 ]; then
-	versions=( */ )
+	versions=( 5*/ )
 fi
 versions=( "${versions[@]%/}" )
 
@@ -15,6 +15,10 @@ curl -sSL "${packagesUrl}.gz" | gunzip > "$packages"
 
 for version in "${versions[@]}"; do
 	cp start_pxc.sh "$version/start_pxc.sh"
+	cp -r templates "$version/templates"
+	cp -r conf.d "$version/conf.d"
+
+	echo $version
 
 	fullVersion="$(grep -m1 -A10 "^Package: percona-server-server-$version\$" "$packages" | grep -m1 '^Version: ' | cut -d' ' -f2)"
 	(
