@@ -28,6 +28,12 @@ if [ "$1" = 'mysqld' -a -z "$wantHelp" ]; then
 			exit 1
 		fi
 
+		if [ -z "$PXC_SST_PASSWORD" ]; then
+			echo >&2 'error: database is uninitialized and PXC_SST_PASSWORD not set'
+			echo >&2 '  Did you forget to add -e PXC_SST_PASSWORD=... ?'
+			exit 1
+		fi
+
 		mkdir -p "$DATADIR"
 		chown -R mysql:mysql "$DATADIR"
 
@@ -70,6 +76,11 @@ if [ "$1" = 'mysqld' -a -z "$wantHelp" ]; then
 			CREATE USER 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}' ;
 			GRANT ALL ON *.* TO 'root'@'%' WITH GRANT OPTION ;
 			DROP DATABASE IF EXISTS test ;
+
+			-- Cluster User
+			CREATE USER 'sstuser'@'%' IDENTIFIED BY '${PXC_SST_PASSWORD}' ;
+			GRANT RELOAD, LOCK TABLES, REPLICATION CLIENT ON *.* TO 'sstuser'@'%' ;
+			GRANT PROCESS ON *.* TO 'clustercheckuser'@'localhost' IDENTIFIED BY 'clustercheckpassword!' ;
 			FLUSH PRIVILEGES ;
 		EOSQL
 

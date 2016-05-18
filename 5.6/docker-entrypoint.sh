@@ -19,7 +19,7 @@ done
 
 if [ "$1" = 'mysqld' -a -z "$wantHelp" ]; then
 	# Get config
-	DATADIR="$("$@" --verbose --help --log-bin-index=`mktemp -u` 2>/dev/null | awk '$1 == "datadir" { print $2; exit }')"
+	DATADIR="$("$@" --verbose --help 2>/dev/null | awk '$1 == "datadir" { print $2; exit }')"
 
 	if [ ! -d "$DATADIR/mysql" ]; then
 		if [ -z "$MYSQL_ROOT_PASSWORD" -a -z "$MYSQL_ALLOW_EMPTY_PASSWORD" -a -z "$MYSQL_RANDOM_ROOT_PASSWORD" ]; then
@@ -28,11 +28,17 @@ if [ "$1" = 'mysqld' -a -z "$wantHelp" ]; then
 			exit 1
 		fi
 
+		if [ -z "$PXC_SST_PASSWORD" ]; then
+			echo >&2 'error: database is uninitialized and PXC_SST_PASSWORD not set'
+			echo >&2 '  Did you forget to add -e PXC_SST_PASSWORD=... ?'
+			exit 1
+		fi
+
 		mkdir -p "$DATADIR"
 		chown -R mysql:mysql "$DATADIR"
 
 		echo 'Initializing database'
-		mysql_install_db --user=mysql --datadir="$DATADIR" --rpm
+		"$@" --initialize-insecure
 		echo 'Database initialized'
 
 		"$@" --skip-networking &
@@ -70,6 +76,11 @@ if [ "$1" = 'mysqld' -a -z "$wantHelp" ]; then
 			CREATE USER 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}' ;
 			GRANT ALL ON *.* TO 'root'@'%' WITH GRANT OPTION ;
 			DROP DATABASE IF EXISTS test ;
+
+			-- Cluster User
+			CREATE USER 'sstuser'@'%' IDENTIFIED BY '${PXC_SST_PASSWORD}' ;
+			GRANT RELOAD, LOCK TABLES, REPLICATION CLIENT ON *.* TO 'sstuser'@'%' ;
+			GRANT PROCESS ON *.* TO 'clustercheckuser'@'localhost' IDENTIFIED BY 'clustercheckpassword!' ;
 			FLUSH PRIVILEGES ;
 		EOSQL
 
@@ -103,6 +114,11 @@ if [ "$1" = 'mysqld' -a -z "$wantHelp" ]; then
 			echo
 		done
 
+		if [ ! -z "$MYSQL_ONETIME_PASSWORD" ]; then
+			"${mysql[@]}" <<-EOSQL
+				ALTER USER 'root'@'%' PASSWORD EXPIRE;
+			EOSQL
+		fi
 		if ! kill -s TERM "$pid" || ! wait "$pid"; then
 			echo >&2 'MySQL init process failed.'
 			exit 1

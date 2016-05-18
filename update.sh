@@ -15,8 +15,8 @@ curl -sSL "${packagesUrl}.gz" | gunzip > "$packages"
 
 for version in "${versions[@]}"; do
 	cp start_pxc.sh "$version/start_pxc.sh"
-	cp -r templates "$version/templates"
-	cp -r conf.d "$version/conf.d"
+	cp -Tr templates "$version/templates"
+	cp -Tr conf.d "$version/conf.d"
 
 	echo $version
 
