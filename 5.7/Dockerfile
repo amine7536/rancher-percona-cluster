@@ -1,6 +1,8 @@
 # vim:set ft=dockerfile:
 FROM ubuntu:14.04
 
+MAINTAINER Amine Benseddik <amine.benseddik@gmail.com>
+
 ENV DEBIAN_FRONTEND noninteractive
 
 # add our user and group first to make sure their IDs get assigned consistently, regardless of whatever dependencies get added
