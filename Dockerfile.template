@@ -43,6 +43,9 @@ RUN mkdir -p /opt/rancher \
 		&& curl -SL https://github.com/kelseyhightower/confd/releases/download/v0.11.0/confd-0.11.0-linux-amd64 -o /opt/rancher/confd \
 		&& chmod +x /opt/rancher/confd
 
+COPY ./conf.d /etc/confd/conf.d
+COPY ./templates /etc/confd/templates
+
 # Rancher Entrypoint
 COPY ./start_pxc.sh /opt/rancher
 
