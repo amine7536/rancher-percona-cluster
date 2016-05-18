@@ -17,14 +17,14 @@ for arg; do
 	esac
 done
 
-if [ "$1" = 'mysqld' -a -z "$wantHelp" ]; then
+if [ "$1" = 'mysqld' ]; then
 	# Get config
-	DATADIR="$("$@" --verbose --help 2>/dev/null | awk '$1 == "datadir" { print $2; exit }')"
+	DATADIR="$(mysqld --verbose --help 2>/dev/null | awk '$1 == "datadir" { print $2; exit }')"
 
-	if [ ! -d "$DATADIR/mysql" ]; then
-		if [ -z "$MYSQL_ROOT_PASSWORD" -a -z "$MYSQL_ALLOW_EMPTY_PASSWORD" -a -z "$MYSQL_RANDOM_ROOT_PASSWORD" ]; then
-			echo >&2 'error: database is uninitialized and password option is not specified '
-			echo >&2 '  You need to specify one of MYSQL_ROOT_PASSWORD, MYSQL_ALLOW_EMPTY_PASSWORD and MYSQL_RANDOM_ROOT_PASSWORD'
+	if [ ! -d "$DATADIR/mysql" ] && [ ! -f "/opt/rancher/configured" ]; then
+		if [ -z "$MYSQL_ROOT_PASSWORD" -a -z "$MYSQL_ALLOW_EMPTY_PASSWORD" ]; then
+			echo >&2 'error: database is uninitialized and MYSQL_ROOT_PASSWORD not set'
+			echo >&2 '  Did you forget to add -e MYSQL_ROOT_PASSWORD=... ?'
 			exit 1
 		fi
 
@@ -37,8 +37,10 @@ if [ "$1" = 'mysqld' -a -z "$wantHelp" ]; then
 		mkdir -p "$DATADIR"
 		chown -R mysql:mysql "$DATADIR"
 
+        sed -i 's/^\(!includedir\)/#\1/' /etc/mysql/my.cnf
+
 		echo 'Initializing database'
-		"$@" --initialize-insecure
+		mysql_install_db --user=mysql --datadir="$DATADIR" --rpm
 		echo 'Database initialized'
 
 		"$@" --skip-networking &
@@ -63,10 +65,6 @@ if [ "$1" = 'mysqld' -a -z "$wantHelp" ]; then
 			mysql_tzinfo_to_sql /usr/share/zoneinfo | sed 's/Local time zone must be set--see zic manual page/FCTY/' | "${mysql[@]}" mysql
 		fi
 
-		if [ ! -z "$MYSQL_RANDOM_ROOT_PASSWORD" ]; then
-			MYSQL_ROOT_PASSWORD="$(pwgen -1 32)"
-			echo "GENERATED ROOT PASSWORD: $MYSQL_ROOT_PASSWORD"
-		fi
 		"${mysql[@]}" <<-EOSQL
 			-- What's done in this file shouldn't be replicated
 			--  or products like mysql-fabric won't work
@@ -76,8 +74,6 @@ if [ "$1" = 'mysqld' -a -z "$wantHelp" ]; then
 			CREATE USER 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}' ;
 			GRANT ALL ON *.* TO 'root'@'%' WITH GRANT OPTION ;
 			DROP DATABASE IF EXISTS test ;
-
-			-- Cluster User
 			CREATE USER 'sstuser'@'%' IDENTIFIED BY '${PXC_SST_PASSWORD}' ;
 			GRANT RELOAD, LOCK TABLES, REPLICATION CLIENT ON *.* TO 'sstuser'@'%' ;
 			GRANT PROCESS ON *.* TO 'clustercheckuser'@'localhost' IDENTIFIED BY 'clustercheckpassword!' ;
@@ -106,25 +102,20 @@ if [ "$1" = 'mysqld' -a -z "$wantHelp" ]; then
 		echo
 		for f in /docker-entrypoint-initdb.d/*; do
 			case "$f" in
-				*.sh)     echo "$0: running $f"; . "$f" ;;
-				*.sql)    echo "$0: running $f"; "${mysql[@]}" < "$f"; echo ;;
-				*.sql.gz) echo "$0: running $f"; gunzip -c "$f" | "${mysql[@]}"; echo ;;
-				*)        echo "$0: ignoring $f" ;;
+				*.sh)  echo "$0: running $f"; . "$f" ;;
+				*.sql) echo "$0: running $f"; "${mysql[@]}" < "$f" && echo ;;
+				*)     echo "$0: ignoring $f" ;;
 			esac
 			echo
 		done
 
-		if [ ! -z "$MYSQL_ONETIME_PASSWORD" ]; then
-			"${mysql[@]}" <<-EOSQL
-				ALTER USER 'root'@'%' PASSWORD EXPIRE;
-			EOSQL
-		fi
 		if ! kill -s TERM "$pid" || ! wait "$pid"; then
 			echo >&2 'MySQL init process failed.'
 			exit 1
 		fi
 
-		echo
+        sed -i '/^#!includedir/{s/^#//}' /etc/mysql/my.cnf
+
 		echo 'MySQL init process done. Ready for start up.'
 		echo
 	fi
