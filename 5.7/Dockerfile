@@ -36,9 +36,12 @@ RUN sed -Ei 's/^(bind-address|log)/#&/' /etc/mysql/my.cnf \
 	&& mv /tmp/my.cnf /etc/mysql/my.cnf
 
 # Prepare for Rancher
+# Download giddyup and confd
 RUN mkdir -p /opt/rancher \
     && curl -SL https://github.com/cloudnautique/giddyup/releases/download/v0.8.0/giddyup -o /opt/rancher/giddyup \
-    && chmod +x /opt/rancher/giddyup
+    && chmod +x /opt/rancher/giddyup \
+		&& curl -SL https://github.com/kelseyhightower/confd/releases/download/v0.11.0/confd-0.11.0-linux-amd64 -o /opt/rancher/confd \
+		&& chmod +x /opt/rancher/confd
 
 # Rancher Entrypoint
 COPY ./start_pxc.sh /opt/rancher
