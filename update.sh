@@ -20,7 +20,7 @@ for version in "${versions[@]}"; do
 
 	echo $version
 
-	fullVersion="$(grep -m1 -A10 "^Package: percona-server-server-$version\$" "$packages" | grep -m1 '^Version: ' | cut -d' ' -f2)"
+	fullVersion="$(grep -m1 -A10 "^Package: percona-xtradb-cluster-$version\$" "$packages" | grep -m1 '^Version: ' | cut -d' ' -f2)"
 	(
 		set -x
 		sed '
