@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -eo pipefail
 
 # if command starts with an option, prepend mysqld
 if [ "${1:0:1}" = '-' ]; then
@@ -17,14 +17,26 @@ for arg; do
 	esac
 done
 
-if [ "$1" = 'mysqld' ]; then
-	# Get config
-	DATADIR="$(mysqld --verbose --help 2>/dev/null | awk '$1 == "datadir" { print $2; exit }')"
+_datadir() {
+	"$@" --verbose --help --log-bin-index=`mktemp -u` 2>/dev/null | awk '$1 == "datadir" { print $2; exit }'
+}
 
-	if [ ! -d "$DATADIR/mysql" ] && [ ! -f "/opt/rancher/configured" ]; then
-		if [ -z "$MYSQL_ROOT_PASSWORD" -a -z "$MYSQL_ALLOW_EMPTY_PASSWORD" ]; then
-			echo >&2 'error: database is uninitialized and MYSQL_ROOT_PASSWORD not set'
-			echo >&2 '  Did you forget to add -e MYSQL_ROOT_PASSWORD=... ?'
+# allow the container to be started with `--user`
+if [ "$1" = 'mysqld' -a -z "$wantHelp" -a "$(id -u)" = '0' ]; then
+	DATADIR="$(_datadir "$@")"
+	mkdir -p "$DATADIR"
+	chown -R mysql:mysql "$DATADIR"
+	exec gosu mysql "$BASH_SOURCE" "$@"
+fi
+
+if [ "$1" = 'mysqld' -a -z "$wantHelp" ]; then
+	# Get config
+	DATADIR="$(_datadir "$@")"
+
+	if [ ! -d "$DATADIR/mysql" ]; then
+		if [ -z "$MYSQL_ROOT_PASSWORD" -a -z "$MYSQL_ALLOW_EMPTY_PASSWORD" -a -z "$MYSQL_RANDOM_ROOT_PASSWORD" ]; then
+			echo >&2 'error: database is uninitialized and password option is not specified '
+			echo >&2 '  You need to specify one of MYSQL_ROOT_PASSWORD, MYSQL_ALLOW_EMPTY_PASSWORD and MYSQL_RANDOM_ROOT_PASSWORD'
 			exit 1
 		fi
 
@@ -35,12 +47,9 @@ if [ "$1" = 'mysqld' ]; then
 		fi
 
 		mkdir -p "$DATADIR"
-		chown -R mysql:mysql "$DATADIR"
-
-        sed -i 's/^\(!includedir\)/#\1/' /etc/mysql/my.cnf
 
 		echo 'Initializing database'
-		mysql_install_db --user=mysql --datadir="$DATADIR" --rpm
+		mysql_install_db --datadir="$DATADIR" --rpm
 		echo 'Database initialized'
 
 		"$@" --skip-networking &
@@ -65,6 +74,10 @@ if [ "$1" = 'mysqld' ]; then
 			mysql_tzinfo_to_sql /usr/share/zoneinfo | sed 's/Local time zone must be set--see zic manual page/FCTY/' | "${mysql[@]}" mysql
 		fi
 
+		if [ ! -z "$MYSQL_RANDOM_ROOT_PASSWORD" ]; then
+			MYSQL_ROOT_PASSWORD="$(pwgen -1 32)"
+			echo "GENERATED ROOT PASSWORD: $MYSQL_ROOT_PASSWORD"
+		fi
 		"${mysql[@]}" <<-EOSQL
 			-- What's done in this file shouldn't be replicated
 			--  or products like mysql-fabric won't work
@@ -74,9 +87,11 @@ if [ "$1" = 'mysqld' ]; then
 			CREATE USER 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}' ;
 			GRANT ALL ON *.* TO 'root'@'%' WITH GRANT OPTION ;
 			DROP DATABASE IF EXISTS test ;
+
 			CREATE USER 'sstuser'@'%' IDENTIFIED BY '${PXC_SST_PASSWORD}' ;
 			GRANT RELOAD, LOCK TABLES, REPLICATION CLIENT ON *.* TO 'sstuser'@'%' ;
 			GRANT PROCESS ON *.* TO 'clustercheckuser'@'localhost' IDENTIFIED BY 'clustercheckpassword!' ;
+
 			FLUSH PRIVILEGES ;
 		EOSQL
 
@@ -102,9 +117,10 @@ if [ "$1" = 'mysqld' ]; then
 		echo
 		for f in /docker-entrypoint-initdb.d/*; do
 			case "$f" in
-				*.sh)  echo "$0: running $f"; . "$f" ;;
-				*.sql) echo "$0: running $f"; "${mysql[@]}" < "$f" && echo ;;
-				*)     echo "$0: ignoring $f" ;;
+				*.sh)     echo "$0: running $f"; . "$f" ;;
+				*.sql)    echo "$0: running $f"; "${mysql[@]}" < "$f"; echo ;;
+				*.sql.gz) echo "$0: running $f"; gunzip -c "$f" | "${mysql[@]}"; echo ;;
+				*)        echo "$0: ignoring $f" ;;
 			esac
 			echo
 		done
@@ -114,13 +130,10 @@ if [ "$1" = 'mysqld' ]; then
 			exit 1
 		fi
 
-        sed -i '/^#!includedir/{s/^#//}' /etc/mysql/my.cnf
-
+		echo
 		echo 'MySQL init process done. Ready for start up.'
 		echo
 	fi
-
-	chown -R mysql:mysql "$DATADIR"
 fi
 
 exec "$@"
